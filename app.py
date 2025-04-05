@@ -4,9 +4,19 @@ import google.generativeai as genai
 import os
 import pdfkit
 import markdown
+import boto3
+from io import BytesIO
+import requests
+from dotenv import load_dotenv
 
-# Set your Gemini API key
-API_KEY = "AIzaSyCtv6LQWAUCj2ZxRUrkqICa_bZaH75SGUU"  # 🔁 Replace this with your Gemini API key
+# Load environment variables from .env
+load_dotenv()
+
+AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
+AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
+BUCKET_NAME = os.getenv("BUCKET_NAME")
+API_KEY = os.getenv("GEMINI_API_KEY")
+
 genai.configure(api_key=API_KEY)
 
 # Function to generate roadmap
@@ -41,6 +51,21 @@ with st.form("roadmap_form"):
     weeks = st.number_input("Number of weeks", min_value=1, max_value=52, value=4)
     submit = st.form_submit_button("Generate Roadmap")
 
+# --- Upload to S3 ---
+def upload_pdf_to_s3(pdf_bytes, filename):
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=AWS_ACCESS_KEY,
+        aws_secret_access_key=AWS_SECRET_KEY,
+    )
+    try:
+        s3.upload_fileobj(BytesIO(pdf_bytes), BUCKET_NAME, filename)
+        url = f"https://{BUCKET_NAME}.s3.amazonaws.com/{filename}"
+        return url
+    except Exception as e:
+        return str(e)
+
+
 # Generate and show roadmap
 if submit:
     with st.spinner("Generating roadmap..."):
@@ -51,19 +76,27 @@ if submit:
         # --- Convert to PDF ---
         pdf_file_path = "study_plan.pdf"
         try:
-            pdfkit.from_string(markdown.markdown(roadmap), pdf_file_path)
+            pdf_bytes = pdfkit.from_string(markdown.markdown(roadmap), False)
         except OSError as e:
-            st.error("Make sure wkhtmltopdf is installed and available in PATH.")
+            st.error("Make sure wkhtmltopdf is installed.")
             st.stop()
 
-        # --- Download Button ---
-        with open(pdf_file_path, "rb") as f:
-            st.download_button(
-                label="📥 Download Study Plan as PDF",
-                data=f,
-                file_name="Study_Plan.pdf",
-                mime="application/pdf"
-            )
+        filename = f"{topic}_Study_Plan.pdf".replace(" ", "_")
+        url = upload_pdf_to_s3(pdf_bytes, filename)
+
+        # --- Download Button using S3 URL ---
+        if url.startswith("http"):
+            response = requests.get(url)
+            if response.status_code == 200:
+                st.download_button(
+                    label="📥 Download Study Plan as PDF",
+                    data=response.content,
+                    file_name=filename,
+                    mime="application/pdf"
+                )
+
+        else:
+            st.error(f"❌ Upload to S3 failed: {url}")
 
 # --- FOOTER ---
 st.markdown("""
