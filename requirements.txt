@@ -1,0 +1,7 @@
+streamlit
+google-generativeai
+pyngrok
+pdfkit
+wkhtmltopdf
+markdown
+boto3
